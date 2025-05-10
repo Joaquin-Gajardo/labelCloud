@@ -699,6 +699,47 @@
        </widget>
       </item>
       <item>
+       <widget class="QPushButton" name="button_pick_sphere">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="layoutDirection">
+         <enum>Qt::LeftToRight</enum>
+        </property>
+        <property name="text">
+         <string>Pick Sphere</string>
+        </property>
+        <property name="icon">
+         <iconset>
+          <normaloff>../icons/cursor-default-click.svg</normaloff>../icons/cursor-default-click.svg</iconset>
+        </property>
+        <property name="iconSize">
+         <size>
+          <width>20</width>
+          <height>20</height>
+         </size>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+        <property name="checked">
+         <bool>false</bool>
+        </property>
+        <property name="autoDefault">
+         <bool>false</bool>
+        </property>
+        <property name="default">
+         <bool>false</bool>
+        </property>
+        <property name="flat">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QPushButton" name="button_pick_bbox">
         <property name="sizePolicy">
          <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
@@ -1742,6 +1783,7 @@ if it does not have labels yet.</string>
   <tabstop>button_bbox_decrease_dimension</tabstop>
   <tabstop>dial_bbox_z_rotation</tabstop>
   <tabstop>button_show_image</tabstop>
+  <tabstop>button_pick_sphere</tabstop>
   <tabstop>button_pick_bbox</tabstop>
   <tabstop>button_span_bbox</tabstop>
   <tabstop>button_save_label</tabstop>

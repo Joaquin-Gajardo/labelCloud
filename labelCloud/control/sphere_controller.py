@@ -6,6 +6,7 @@ import numpy as np
 
 from ..io.labels.config import LabelConfig
 from ..model.sphere import Sphere
+from .pcd_manager import PointCloudManger
 
 if TYPE_CHECKING:
     from ..view.gui import GUI
@@ -16,10 +17,10 @@ class SphereController:
 
     def __init__(self) -> None:
         """Initialize the sphere controller."""
+        self.view: GUI
+        self.pcd_manager: PointCloudManger
         self.spheres: List[Sphere] = []
         self.active_sphere_id: Optional[int] = None
-        self.view = None
-        self.pcd_manager = None
 
     def set_view(self, view) -> None:
         """Set the view for this controller."""
@@ -56,11 +57,13 @@ class SphereController:
 
             # Set new active sphere
             self.active_sphere_id = sphere_id
-            self.get_active_sphere().selected = True
+            self.get_active_sphere().selected = True  # Make sure this flag is set
 
             # Update UI
             self.update_all()
         else:
+            if self.has_active_sphere():
+                self.get_active_sphere().selected = False
             self.active_sphere_id = None
 
     def has_active_sphere(self) -> bool:
@@ -211,9 +214,30 @@ class SphereController:
         """Update UI to reflect changes in spheres."""
         if self.view:
             # Update sphere list in UI
-            self.view.update_label_list()
+            self.update_label_list()
 
             # Update sphere properties display
             if self.has_active_sphere():
                 sphere = self.get_active_sphere()
                 self.view.update_bbox_stats(sphere)
+
+    def update_label_list(self) -> None:
+        """Updates the list of drawn labels and highlights the active label.
+
+        Should be always called if the spheres changed.
+        :return: None
+        """
+        self.view.label_list.blockSignals(True)  # To brake signal loop
+        self.view.label_list.clear()
+        for sphere in self.spheres:  # Changed from self.bboxes to self.spheres
+            self.view.label_list.addItem(sphere.get_classname())
+        if (
+            self.has_active_sphere()
+        ):  # Changed from has_active_bbox to has_active_sphere
+            self.view.label_list.setCurrentRow(
+                self.active_sphere_id
+            )  # Changed from active_bbox_id to active_sphere_id
+            current_item = self.view.label_list.currentItem()
+            if current_item:
+                current_item.setSelected(True)
+        self.view.label_list.blockSignals(False)

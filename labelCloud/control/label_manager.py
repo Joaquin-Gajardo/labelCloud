@@ -1,10 +1,16 @@
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 
-from ..io.labels import BaseLabelFormat, CentroidFormat, KittiFormat, VerticesFormat
+from ..io.labels import (
+    BaseLabelFormat,
+    CentroidFormat,
+    KittiFormat,
+    SphereCentroidFormat,
+    VerticesFormat,
+)
 from ..io.labels.config import LabelConfig
-from ..model import BBox
+from ..model import BBox, Sphere
 from .config_manager import config
 
 
@@ -26,6 +32,11 @@ def get_label_strategy(export_format: str, label_folder: Path) -> "BaseLabelForm
             relative_rotation=True,
             transformed=False,
         )
+    elif export_format == "sphere_centroid":
+        return SphereCentroidFormat(
+            label_folder, LabelManager.EXPORT_PRECISION, relative_rotation=True
+        )
+
     elif export_format != "centroid_abs":
         logging.warning(
             f"Unknown export strategy '{export_format}'. Proceeding with default (centroid_abs)!"
@@ -52,9 +63,12 @@ class LabelManager(object):
 
         self.label_strategy = get_label_strategy(strategy, self.label_folder)
 
-    def import_labels(self, pcd_path: Path) -> List[BBox]:
+    def import_labels(
+        self, pcd_path: Path
+    ) -> Union[List[BBox], Tuple[List[BBox], List[Sphere]]]:
         try:
             return self.label_strategy.import_labels(pcd_path)
+
         except KeyError as key_error:
             logging.warning("Found a key error with %s in the dictionary." % key_error)
             logging.warning(
@@ -70,5 +84,16 @@ class LabelManager(object):
             )
             return []
 
-    def export_labels(self, pcd_path: Path, bboxes: List[BBox]) -> None:
+    def export_labels(
+        self, pcd_path: Path, bboxes: List[BBox], spheres: Optional[List[Sphere]] = None
+    ) -> None:
+        # Check if our strategy supports spheres
+        if spheres and isinstance(self.label_strategy, SphereCentroidFormat):
+            try:
+                self.label_strategy.export_labels(bboxes, pcd_path, spheres)
+                return
+            except Exception as e:
+                logging.warning(f"Error exporting spheres: {e}")
+                logging.warning("Falling back to standard export (bboxes only)")
+
         self.label_strategy.export_labels(bboxes, pcd_path)

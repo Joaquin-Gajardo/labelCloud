@@ -3,16 +3,50 @@ from typing import TYPE_CHECKING, Union
 
 from ..labeling_strategies import BaseLabelingStrategy
 from .bbox_controller import BoundingBoxController
+from .sphere_controller import SphereController
 
 if TYPE_CHECKING:
     from ..view.gui import GUI
 
 
 class DrawingManager(object):
-    def __init__(self, bbox_controller: BoundingBoxController) -> None:
+    def __init__(
+        self,
+        bbox_controller: BoundingBoxController,
+        sphere_controller: SphereController = None,
+    ) -> None:
         self.view: "GUI"
         self.bbox_controller = bbox_controller
+        self.sphere_controller = sphere_controller
         self.drawing_strategy: Union[BaseLabelingStrategy, None] = None
+        self.primitive_type = "box"  # Default to box
+
+    # Add method to set primitive type
+    def set_primitive_type(self, primitive_type):
+        """Set the current primitive type (box or sphere)."""
+        self.primitive_type = primitive_type
+
+    # Update register_point method
+    def register_point(self, x, y, correction=False, is_temporary=False):
+        assert self.drawing_strategy is not None
+        world_point = self.view.gl_widget.get_world_coords(x, y, correction=correction)
+
+        if is_temporary:
+            self.drawing_strategy.register_tmp_point(world_point)
+        else:
+            self.drawing_strategy.register_point(world_point)
+            if self.drawing_strategy.is_bbox_finished():
+                # Register box or sphere based on primitive type
+                if self.primitive_type == "sphere" and hasattr(
+                    self.drawing_strategy, "get_sphere"
+                ):
+                    self.sphere_controller.add_sphere(
+                        self.drawing_strategy.get_sphere()
+                    )
+                else:  # Default to box
+                    self.bbox_controller.add_bbox(self.drawing_strategy.get_bbox())
+                self.drawing_strategy.reset()
+                self.drawing_strategy = None
 
     def set_view(self, view: "GUI") -> None:
         self.view = view

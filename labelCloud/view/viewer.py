@@ -13,6 +13,7 @@ from ..control.bbox_controller import BoundingBoxController
 from ..control.config_manager import config
 from ..control.drawing_manager import DrawingManager
 from ..control.pcd_manager import PointCloudManger
+from ..control.sphere_controller import SphereController
 from ..definitions.types import Color4f, Point2D
 from ..utils import oglhelper
 
@@ -62,6 +63,10 @@ class GLWidget(QtOpenGL.QGLWidget):
     def set_bbox_controller(self, bbox_controller: BoundingBoxController) -> None:
         self.bbox_controller = bbox_controller
 
+    def set_sphere_controller(self, sphere_controller: SphereController) -> None:
+        """Set the main controller for this GLWidget."""
+        self.sphere_controller = sphere_controller
+
     # QGLWIDGET METHODS
 
     def initializeGL(self) -> None:
@@ -89,49 +94,85 @@ class GLWidget(QtOpenGL.QGLWidget):
         GL.glMatrixMode(GL.GL_MODELVIEW)
 
     def paintGL(self) -> None:
+        """Updates the screen and draws all points and bounding boxes and spheres."""
         GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
-        GL.glPushMatrix()  # push the current matrix to the current stack
+        GL.glLoadIdentity()  # Reset the modelview matrix
+        GL.glPushMatrix()  # Push the current matrix to the current stack
 
-        # Draw point cloud
-        self.pcd_manager.pointcloud.draw_pointcloud()  # type: ignore
+        try:
+            # Draw point cloud
+            if hasattr(self.pcd_manager, "pointcloud") and self.pcd_manager.pointcloud:
+                self.pcd_manager.pointcloud.draw_pointcloud()  # type: ignore
 
-        # Get actual matrices for click unprojection
-        self.modelview = GL.glGetDoublev(GL.GL_MODELVIEW_MATRIX)
-        self.projection = GL.glGetDoublev(GL.GL_PROJECTION_MATRIX)
+            # Get actual matrices for click unprojection
+            self.modelview = GL.glGetDoublev(GL.GL_MODELVIEW_MATRIX)
+            self.projection = GL.glGetDoublev(GL.GL_PROJECTION_MATRIX)
 
-        with ignore_depth_mask():  # Do not write decoration and preview elements in depth buffer
-            if config.getboolean("USER_INTERFACE", "show_floor"):
-                oglhelper.draw_xy_plane(self.pcd_manager.pointcloud)  # type: ignore
+            with ignore_depth_mask():  # Do not write decoration and preview elements in depth buffer
+                if config.getboolean("USER_INTERFACE", "show_floor"):
+                    oglhelper.draw_xy_plane(self.pcd_manager.pointcloud)  # type: ignore
 
-            # Draw crosshair/ cursor in 3D world
-            if self.crosshair_pos:
-                cx, cy, cz = self.get_world_coords(*self.crosshair_pos, correction=True)
-                oglhelper.draw_crosshair(cx, cy, cz, color=self.crosshair_col)
+                # Draw crosshair/ cursor in 3D world
+                if self.crosshair_pos:
+                    cx, cy, cz = self.get_world_coords(
+                        *self.crosshair_pos, correction=True
+                    )
+                    oglhelper.draw_crosshair(cx, cy, cz, color=self.crosshair_col)
 
-            if self.drawing_mode.has_preview():
-                self.drawing_mode.draw_preview()
+                if self.drawing_mode.has_preview():
+                    self.drawing_mode.draw_preview()
 
-            if self.align_mode is not None:
-                if self.align_mode.is_active:
-                    self.align_mode.draw_preview()
+                if self.align_mode is not None:
+                    if self.align_mode.is_active:
+                        self.align_mode.draw_preview()
 
-            # Highlight selected side with filled rectangle
-            if len(self.selected_side_vertices) == 4:
-                oglhelper.draw_rectangles(
-                    self.selected_side_vertices, color=(0, 1, 0, 0.3)
-                )
+                # Highlight selected side with filled rectangle
+                if len(self.selected_side_vertices) == 4:
+                    oglhelper.draw_rectangles(
+                        self.selected_side_vertices, color=(0, 1, 0, 0.3)
+                    )
 
-        # Draw active bbox
-        if self.bbox_controller.has_active_bbox():
-            self.bbox_controller.get_active_bbox().draw_bbox(highlighted=True)  # type: ignore
-            if config.getboolean("USER_INTERFACE", "show_orientation"):
-                self.bbox_controller.get_active_bbox().draw_orientation()  # type: ignore
+            # Draw active bbox if in box mode
+            if (
+                hasattr(self, "bbox_controller")
+                and self.bbox_controller.has_active_bbox()
+            ):
+                self.bbox_controller.get_active_bbox().draw_bbox(highlighted=True)  # type: ignore
+                if config.getboolean("USER_INTERFACE", "show_orientation"):
+                    self.bbox_controller.get_active_bbox().draw_orientation()  # type: ignore
 
-        # Draw labeled bboxes
-        for bbox in self.bbox_controller.bboxes:  # type: ignore
-            bbox.draw_bbox()
+            # Draw all bounding boxes
+            if hasattr(self, "bbox_controller"):
+                for bbox in self.bbox_controller.bboxes:  # type: ignore
+                    if (
+                        bbox is not self.bbox_controller.get_active_bbox()
+                    ):  # Don't draw active bbox twice
+                        bbox.draw_bbox()
 
-        GL.glPopMatrix()  # restore the previous modelview matrix
+            # Draw active sphere if in sphere mode
+            if (
+                hasattr(self, "sphere_controller")
+                and self.sphere_controller.has_active_sphere()
+            ):
+                active_sphere = self.sphere_controller.get_active_sphere()
+                # Draw active sphere with a different color or style if needed
+                # For now, it will be drawn in the regular sphere drawing loop
+
+            # Draw all spheres
+            if hasattr(self, "sphere_controller"):
+                for sphere in self.sphere_controller.spheres:
+                    try:
+                        sphere.draw()
+                    except Exception as e:
+                        logging.error(f"Error drawing sphere: {e}")
+                        # Continue drawing other spheres even if one fails
+
+        except Exception as e:
+            logging.error(f"Error in paintGL: {e}")
+
+        finally:
+            # Ensure matrix state is always restored
+            GL.glPopMatrix()  # restore the previous modelview matrix
 
     # Translates the 2D cursor position from screen plane into 3D world space coordinates
     def get_world_coords(

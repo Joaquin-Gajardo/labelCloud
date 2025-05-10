@@ -201,3 +201,23 @@ def get_line_plane_intersection(
         return np.add(p0, u)
     else:
         return None  # The segment is parallel to plane.
+
+
+def points_in_sphere(
+    points: np.ndarray, center: np.ndarray, radius: float
+) -> np.ndarray:
+    """Get a boolean mask of points inside a sphere.
+
+    Args:
+        points: Nx3 array of points
+        center: Sphere center [x, y, z]
+        radius: Sphere radius
+
+    Returns:
+        np.ndarray: Boolean mask where True indicates point is inside sphere
+    """
+    # Calculate squared distances from each point to sphere center
+    squared_distances = np.sum((points - center) ** 2, axis=1)
+
+    # Return boolean mask (True for points inside sphere)
+    return squared_distances <= (radius**2)

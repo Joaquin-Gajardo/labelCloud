@@ -2,12 +2,11 @@ from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
-
 import OpenGL.GL as GL
 from OpenGL import GLU
 
-from . import math3d
 from ..definitions import BBOX_SIDES, Color4f, Point3D
+from . import math3d
 
 if TYPE_CHECKING:
     from ..model import BBox, PointCloud
@@ -109,6 +108,64 @@ def draw_xy_plane(pcd: "PointCloud") -> None:
         GL.glVertex3d(x, y_min, 0)
         GL.glVertex3d(x, y_max, 0)
     GL.glEnd()
+
+
+def draw_sphere(
+    center, radius, color=(1, 1, 1, 1), draw_wireframe=False, slices=16, stacks=16
+):
+    """Draw a sphere in OpenGL.
+
+    Args:
+        center: 3D point representing sphere center
+        radius: Sphere radius
+        color: RGBA color tuple
+        draw_wireframe: Whether to draw as wireframe
+        slices: Number of slices for sphere tessellation
+        stacks: Number of stacks for sphere tessellation
+    """
+    import OpenGL.GL as GL
+    from OpenGL import GLU
+
+    # Create a quadric object for drawing
+    quadric = GLU.gluNewQuadric()
+    GLU.gluQuadricNormals(quadric, GLU.GLU_SMOOTH)
+
+    # Save current state
+    GL.glPushMatrix()
+    GL.glPushAttrib(GL.GL_CURRENT_BIT | GL.GL_LIGHTING_BIT)
+
+    # Apply transformations
+    GL.glTranslatef(center[0], center[1], center[2])
+
+    # Set color
+    GL.glColor4f(*color)
+
+    # Enable transparency if alpha < 1
+    if color[3] < 1.0:
+        GL.glEnable(GL.GL_BLEND)
+        GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
+
+    # Draw as wireframe if requested
+    if draw_wireframe:
+        GL.glPolygonMode(GL.GL_FRONT_AND_BACK, GL.GL_LINE)
+
+    # Draw the sphere
+    GLU.gluSphere(quadric, radius, slices, stacks)
+
+    # Reset wireframe mode
+    if draw_wireframe:
+        GL.glPolygonMode(GL.GL_FRONT_AND_BACK, GL.GL_FILL)
+
+    # Disable transparency
+    if color[3] < 1.0:
+        GL.glDisable(GL.GL_BLEND)
+
+    # Restore state
+    GL.glPopAttrib()
+    GL.glPopMatrix()
+
+    # Clean up resources
+    GLU.gluDeleteQuadric(quadric)
 
 
 # RAY PICKING

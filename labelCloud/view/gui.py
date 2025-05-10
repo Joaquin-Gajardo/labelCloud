@@ -24,7 +24,11 @@ from ..control.config_manager import config
 from ..definitions import Color3f, LabelingMode
 from ..io.labels.config import LabelConfig
 from ..io.pointclouds import BasePointCloudHandler
-from ..labeling_strategies import PickingStrategy, SpanningStrategy
+from ..labeling_strategies import (
+    PickingStrategy,
+    SpanningStrategy,
+    SpherePickingStrategy,
+)
 from ..model.point_cloud import PointCloud
 from .settings_dialog import SettingsDialog  # type: ignore
 from .startup.dialog import StartupDialog
@@ -192,6 +196,7 @@ class GUI(QtWidgets.QMainWindow):
         # label mode selection
         self.button_pick_bbox: QtWidgets.QPushButton
         self.button_span_bbox: QtWidgets.QPushButton
+        self.button_pick_sphere: QtWidgets.QPushButton
         self.button_save_label: QtWidgets.QPushButton
 
         # RIGHT PANEL
@@ -345,6 +350,14 @@ class GUI(QtWidgets.QMainWindow):
             lambda: self.controller.drawing_mode.set_drawing_strategy(
                 SpanningStrategy(self)
             )
+        )
+        self.button_pick_sphere.clicked.connect(
+            lambda: self.controller.drawing_mode.set_drawing_strategy(
+                SpherePickingStrategy(self)
+            )
+        )
+        self.button_pick_sphere.clicked.connect(
+            lambda: self.controller.set_primitive_type("sphere")
         )
         self.button_save_label.clicked.connect(self.controller.save)
 
@@ -525,28 +538,91 @@ class GUI(QtWidgets.QMainWindow):
     def update_current_class_dropdown(self) -> None:
         self.controller.pcd_manager.populate_class_dropdown()
 
-    def update_bbox_stats(self, bbox) -> None:
+    # def update_bbox_stats(self, bbox) -> None:
+    #     viewing_precision = config.getint("USER_INTERFACE", "viewing_precision")
+    #     if bbox and not self.line_edited_activated():
+    #         self.edit_pos_x.setText(str(round(bbox.get_center()[0], viewing_precision)))
+    #         self.edit_pos_y.setText(str(round(bbox.get_center()[1], viewing_precision)))
+    #         self.edit_pos_z.setText(str(round(bbox.get_center()[2], viewing_precision)))
+
+    #         self.edit_length.setText(
+    #             str(round(bbox.get_dimensions()[0], viewing_precision))
+    #         )
+    #         self.edit_width.setText(
+    #             str(round(bbox.get_dimensions()[1], viewing_precision))
+    #         )
+    #         self.edit_height.setText(
+    #             str(round(bbox.get_dimensions()[2], viewing_precision))
+    #         )
+
+    #         self.edit_rot_x.setText(str(round(bbox.get_x_rotation(), 1)))
+    #         self.edit_rot_y.setText(str(round(bbox.get_y_rotation(), 1)))
+    #         self.edit_rot_z.setText(str(round(bbox.get_z_rotation(), 1)))
+
+    #         self.label_volume.setText(str(round(bbox.get_volume(), viewing_precision)))
+
+    def update_bbox_stats(self, primitive) -> None:
+        """Update stats display for the active primitive (bounding box or sphere)."""
         viewing_precision = config.getint("USER_INTERFACE", "viewing_precision")
-        if bbox and not self.line_edited_activated():
-            self.edit_pos_x.setText(str(round(bbox.get_center()[0], viewing_precision)))
-            self.edit_pos_y.setText(str(round(bbox.get_center()[1], viewing_precision)))
-            self.edit_pos_z.setText(str(round(bbox.get_center()[2], viewing_precision)))
 
-            self.edit_length.setText(
-                str(round(bbox.get_dimensions()[0], viewing_precision))
+        if primitive and not self.line_edited_activated():
+            # Get the center coordinates (common for both bbox and sphere)
+            self.edit_pos_x.setText(
+                str(round(primitive.get_center()[0], viewing_precision))
             )
-            self.edit_width.setText(
-                str(round(bbox.get_dimensions()[1], viewing_precision))
+            self.edit_pos_y.setText(
+                str(round(primitive.get_center()[1], viewing_precision))
             )
-            self.edit_height.setText(
-                str(round(bbox.get_dimensions()[2], viewing_precision))
+            self.edit_pos_z.setText(
+                str(round(primitive.get_center()[2], viewing_precision))
             )
 
-            self.edit_rot_x.setText(str(round(bbox.get_x_rotation(), 1)))
-            self.edit_rot_y.setText(str(round(bbox.get_y_rotation(), 1)))
-            self.edit_rot_z.setText(str(round(bbox.get_z_rotation(), 1)))
+            # Check primitive type to handle different attributes
+            if hasattr(primitive, "get_dimensions"):  # It's a BoundingBox
+                # Handle dimensions for BoundingBox
+                self.edit_length.setText(
+                    str(round(primitive.get_dimensions()[0], viewing_precision))
+                )
+                self.edit_width.setText(
+                    str(round(primitive.get_dimensions()[1], viewing_precision))
+                )
+                self.edit_height.setText(
+                    str(round(primitive.get_dimensions()[2], viewing_precision))
+                )
 
-            self.label_volume.setText(str(round(bbox.get_volume(), viewing_precision)))
+                # Handle rotation for BoundingBox
+                self.edit_rot_x.setText(str(round(primitive.get_x_rotation(), 1)))
+                self.edit_rot_y.setText(str(round(primitive.get_y_rotation(), 1)))
+                self.edit_rot_z.setText(str(round(primitive.get_z_rotation(), 1)))
+
+                # Update volume
+                self.label_volume.setText(
+                    str(round(primitive.get_volume(), viewing_precision))
+                )
+
+            elif hasattr(primitive, "radius"):  # It's a Sphere
+                # For a sphere, use radius instead of dimensions
+                radius = primitive.radius
+                self.edit_length.setText(
+                    str(round(radius * 2, viewing_precision))
+                )  # diameter
+                self.edit_width.setText(
+                    str(round(radius * 2, viewing_precision))
+                )  # diameter
+                self.edit_height.setText(
+                    str(round(radius * 2, viewing_precision))
+                )  # diameter
+
+                # Set rotation to 0 for spheres (no rotation)
+                self.edit_rot_x.setText("0.0")
+                self.edit_rot_y.setText("0.0")
+                self.edit_rot_z.setText("0.0")
+
+                # Calculate and update sphere volume (4/3 * π * r³)
+                import math
+
+                volume = (4 / 3) * math.pi * (radius**3)
+                self.label_volume.setText(str(round(volume, viewing_precision)))
 
     def update_bbox_parameter(self, parameter: str) -> None:
         str_value = None
@@ -588,6 +664,7 @@ class GUI(QtWidgets.QMainWindow):
     def activate_draw_modes(self, state: bool) -> None:
         self.button_pick_bbox.setEnabled(state)
         self.button_span_bbox.setEnabled(state)
+        self.button_pick_sphere.setEnabled(state)
 
     def line_edited_activated(self) -> bool:
         for line_edit in self.all_line_edits:
@@ -672,6 +749,59 @@ class GUI(QtWidgets.QMainWindow):
         LabelConfig().set_class_color(
             bbox.classname, Color3f.from_qcolor(QColorDialog.getColor())
         )
+
+    def update_primitive_mode(self, primitive_type: str) -> None:
+        """Updates the UI to reflect the current primitive creation mode (box or sphere)."""
+        # Update visual indicators or button states to show current mode
+        if primitive_type == "sphere":
+            self.button_pick_sphere.setChecked(True)
+            self.button_pick_bbox.setChecked(False)
+            self.button_span_bbox.setChecked(False)
+        elif primitive_type == "box":
+            self.button_pick_sphere.setChecked(False)
+            # Keep the current box creation mode selected, or default to one if none is selected
+            if (
+                not self.button_pick_bbox.isChecked()
+                and not self.button_span_bbox.isChecked()
+            ):
+                self.button_pick_bbox.setChecked(True)
+
+        # Update any other UI elements that need to reflect the current primitive mode
+        # For example, showing/hiding dimension controls that are specific to boxes or spheres
+        box_controls_visible = primitive_type == "box"
+        self.dial_bbox_z_rotation.setVisible(box_controls_visible)
+
+        # Update status message
+        self.status_manager.set_message(f"Switched to {primitive_type} creation mode.")
+
+    def update_primitive_mode(self, primitive_type: str) -> None:
+        """Updates the UI to reflect the current primitive creation mode."""
+        # Update button states
+        if primitive_type == "sphere":
+            # Update button states
+            self.button_pick_sphere.setChecked(True)
+            self.button_pick_bbox.setChecked(False)
+            self.button_span_bbox.setChecked(False)
+
+            # Hide box-specific controls
+            self.dial_bbox_z_rotation.setVisible(False)
+            self.button_bbox_decrease_dimension.setVisible(False)
+            self.button_bbox_increase_dimension.setVisible(False)
+
+            # Update labels
+            self.label_volume.setText("Sphere Volume")
+
+        elif primitive_type == "box":
+            # Update button states
+            self.button_pick_sphere.setChecked(False)
+
+            # Show box-specific controls
+            self.dial_bbox_z_rotation.setVisible(True)
+            self.button_bbox_decrease_dimension.setVisible(True)
+            self.button_bbox_increase_dimension.setVisible(True)
+
+            # Update labels
+            self.label_volume.setText("Box Volume")
 
     @staticmethod
     def save_point_cloud_as(pointcloud: PointCloud) -> None:

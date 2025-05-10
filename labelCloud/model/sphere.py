@@ -7,7 +7,7 @@ import OpenGL.GL as GL
 from OpenGL import GLU
 
 from ..definitions import Color3f
-from ..utils.color import Color
+from ..io.labels.config import LabelConfig
 
 
 class Sphere:
@@ -27,7 +27,9 @@ class Sphere:
         self.radius = max(radius, 0.01)  # Ensure minimum radius
         self.classname = label  # Using the same attribute name as BoundingBox
         self.id = None  # Will be assigned when added to collection
-        self.color = Color.from_label(label) if label else Color(0.7, 0.7, 0.7)
+        self.color = (
+            LabelConfig().get_class_color(label) if label else Color3f(0.7, 0.7, 0.7)
+        )
         self.selected = False
 
         # For visualization
@@ -40,38 +42,46 @@ class Sphere:
         GLU.gluQuadricTexture(self._quadric, GL.GL_TRUE)
 
     def draw(self) -> None:
-        """Draw the sphere using OpenGL."""
+        """Draw the sphere in OpenGL."""
         GL.glPushMatrix()
 
-        # Apply transformations
-        GL.glTranslatef(self.center[0], self.center[1], self.center[2])
+        try:
+            # Set color based on selection state
+            if self.selected:
+                # Use a highlight color for selected sphere (green)
+                GL.glColor3f(0.0, 1.0, 0.0)  # Bright green
+                GL.glLineWidth(3.0)  # Thicker lines for selected sphere
+            else:
+                # Use the normal color for non-selected spheres
+                if isinstance(self.color, Color3f):
+                    GL.glColor3f(self.color.r, self.color.g, self.color.b)
+                elif isinstance(self.color, tuple) and len(self.color) >= 3:
+                    GL.glColor3f(*self.color[:3])
+                else:
+                    # Default color if none set (light blue)
+                    GL.glColor3f(0.3, 0.3, 1.0)
+                GL.glLineWidth(1.0)
 
-        # Set color based on selection state
-        if self.selected:
-            GL.glColor3f(1.0, 0.5, 0.0)  # Orange for selected sphere
-        else:
-            GL.glColor3f(self.color.r, self.color.g, self.color.b)
+            # Translate to sphere center
+            GL.glTranslatef(self.center[0], self.center[1], self.center[2])
 
-        # Draw sphere
-        GLU.gluSphere(
-            self._quadric, self.radius, self._sphere_slices, self._sphere_stacks
-        )
+            # Create quadric object for sphere
+            quadric = GLU.gluNewQuadric()
+            GLU.gluQuadricDrawStyle(quadric, GLU.GLU_LINE)  # Wireframe style
 
-        # Draw wireframe if selected
-        if self.selected:
-            GL.glPolygonMode(GL.GL_FRONT_AND_BACK, GL.GL_LINE)
-            GL.glLineWidth(2.0)
-            GL.glColor3f(1.0, 1.0, 1.0)  # White wireframe
+            # Draw the sphere
             GLU.gluSphere(
-                self._quadric,
-                self.radius * 1.01,
-                self._sphere_slices,
-                self._sphere_stacks,
-            )
-            GL.glPolygonMode(GL.GL_FRONT_AND_BACK, GL.GL_FILL)
-            GL.glLineWidth(1.0)
+                quadric, self.radius, 16, 16
+            )  # 16 slices and stacks for better performance
 
-        GL.glPopMatrix()
+            # Clean up
+            GLU.gluDeleteQuadric(quadric)
+
+        finally:
+            # Always restore the matrix state
+            GL.glPopMatrix()
+            # Reset line width
+            GL.glLineWidth(1.0)
 
     def translate(self, vector: np.ndarray) -> None:
         """Move the sphere center by the given vector."""
@@ -96,7 +106,7 @@ class Sphere:
     def set_classname(self, classname: str) -> None:
         """Set the class name for this sphere."""
         self.classname = classname
-        self.color = Color.from_label(classname)
+        self.color = LabelConfig().get_class_color(classname)
 
     def get_classname(self) -> str:
         """Get the class name of this sphere."""

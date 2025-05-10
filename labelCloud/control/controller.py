@@ -8,13 +8,16 @@ from PyQt5.QtCore import Qt as Keys
 
 from ..definitions import BBOX_SIDES, Colors, Context, LabelingMode
 from ..io.labels.config import LabelConfig
+from ..model.sphere import Sphere
 from ..utils import oglhelper
+from ..utils.math3d import points_in_sphere
 from ..view.gui import GUI
 from .alignmode import AlignMode
 from .bbox_controller import BoundingBoxController
 from .config_manager import config
 from .drawing_manager import DrawingManager
 from .pcd_manager import PointCloudManger
+from .sphere_controller import SphereController
 
 
 class Controller:
@@ -25,9 +28,10 @@ class Controller:
         self.view: "GUI"
         self.pcd_manager = PointCloudManger()
         self.bbox_controller = BoundingBoxController()
+        self.sphere_controller = SphereController()
 
         # Drawing states
-        self.drawing_mode = DrawingManager(self.bbox_controller)
+        self.drawing_mode = DrawingManager(self.bbox_controller, self.sphere_controller)
         self.align_mode = AlignMode(self.pcd_manager)
 
         # Control states
@@ -40,15 +44,20 @@ class Controller:
         self.side_mode = False
         self.selected_side: Optional[str] = None
 
+        self.primitive_type = "box"  # Either "box" or "sphere"
+
     def startup(self, view: "GUI") -> None:
         """Sets the view in all controllers and dependent modules; Loads labels from file."""
         self.view = view
         self.bbox_controller.set_view(self.view)
+        self.sphere_controller.set_view(self.view)
         self.pcd_manager.set_view(self.view)
         self.drawing_mode.set_view(self.view)
         self.align_mode.set_view(self.view)
         self.view.gl_widget.set_bbox_controller(self.bbox_controller)
+        self.view.gl_widget.set_sphere_controller(self.sphere_controller)
         self.bbox_controller.pcd_manager = self.pcd_manager
+        self.sphere_controller.pcd_manager = self.pcd_manager
 
         # Read labels from folders
         self.pcd_manager.read_pointcloud_folder()
@@ -59,6 +68,20 @@ class Controller:
         self.set_crosshair()
         self.set_selected_side()
         self.view.gl_widget.updateGL()
+
+    def set_primitive_type(self, primitive_type: str) -> None:
+        """Set the type of primitive to create (box or sphere)."""
+        if primitive_type in ["box", "sphere"]:
+            self.primitive_type = primitive_type
+            self.drawing_mode.set_primitive_type(primitive_type)
+
+            # Update UI to reflect current mode
+            if self.view:
+                self.view.update_primitive_mode(primitive_type)
+
+            # Reset drawing mode when switching primitive types
+            if self.drawing_mode.is_active():
+                self.drawing_mode.reset()
 
     # POINT CLOUD METHODS
     def next_pcd(self, save: bool = True) -> None:
@@ -95,8 +118,10 @@ class Controller:
 
     # CONTROL METHODS
     def save(self) -> None:
-        """Saves all bounding boxes and optionally segmentation labels in the label file."""
-        self.pcd_manager.save_labels_into_file(self.bbox_controller.bboxes)
+        """Saves all bounding boxes, spheres and optionally segmentation labels in the label file."""
+        self.pcd_manager.save_labels_into_file(
+            self.bbox_controller.bboxes, self.sphere_controller.spheres
+        )
 
         if LabelConfig().type == LabelingMode.SEMANTIC_SEGMENTATION:
             assert self.pcd_manager.pointcloud is not None
@@ -105,6 +130,7 @@ class Controller:
     def reset(self) -> None:
         """Resets the controllers and bounding boxes from the current screen."""
         self.bbox_controller.reset()
+        self.sphere_controller.reset()
         self.drawing_mode.reset()
         self.align_mode.reset()
 
@@ -156,8 +182,52 @@ class Controller:
         """Triggers actions when the user clicks the mouse."""
         self.last_cursor_pos = a0.pos()
 
+        # Handle sphere selection and creation
         if (
-            self.drawing_mode.is_active()
+            self.primitive_type == "sphere"
+            and (a0.buttons() & Keys.LeftButton)
+            and (not self.ctrl_pressed)
+            and (not self.drawing_mode.is_active())
+            and (not self.align_mode.is_active)
+        ):
+            # Get world coordinates from screen position
+            world_pos = self.view.gl_widget.get_world_coords(
+                a0.x(), a0.y(), correction=False
+            )
+
+            # First try to select an existing sphere
+            selected = False
+            if self.sphere_controller.spheres:
+                # Find closest sphere
+                closest_sphere = None
+                closest_distance = float("inf")
+
+                for sphere in self.sphere_controller.spheres:
+                    distance = np.linalg.norm(sphere.center - world_pos)
+                    if distance < closest_distance:
+                        closest_distance = distance
+                        closest_sphere = sphere
+
+                # If clicked close to an existing sphere, select it instead of creating a new one
+                if closest_sphere and closest_distance <= closest_sphere.radius * 1.5:
+                    self.sphere_controller.set_active_sphere(closest_sphere.id)
+                    selected = True
+
+            # If no sphere was selected, create a new one
+            if not selected:
+                # Create new sphere at clicked position
+                radius = float(config.get("LABEL", "std_sphere_radius", fallback=0.5))
+                sphere = Sphere(
+                    center=world_pos,
+                    radius=radius,
+                    label=LabelConfig().get_default_class_name(),
+                )
+                self.sphere_controller.add_sphere(sphere)
+            return
+
+        elif (
+            self.primitive_type == "box"
+            and self.drawing_mode.is_active()
             and (a0.buttons() & Keys.LeftButton)
             and (not self.ctrl_pressed)
         ):
@@ -173,7 +243,10 @@ class Controller:
 
     def mouse_double_clicked(self, a0: QtGui.QMouseEvent) -> None:
         """Triggers actions when the user double clicks the mouse."""
-        self.bbox_controller.select_bbox_by_ray(a0.x(), a0.y())
+        if self.primitive_type == "sphere":
+            self.sphere_controller.select_sphere_by_ray(a0.x(), a0.y())
+        else:  # Default to box
+            self.bbox_controller.select_bbox_by_ray(a0.x(), a0.y())
 
     def mouse_move_event(self, a0: QtGui.QMouseEvent) -> None:
         """Triggers actions when the user moves the mouse."""
@@ -201,13 +274,36 @@ class Controller:
                 and (not self.drawing_mode.is_active())
                 and (not self.align_mode.is_active)
             ):
-                if a0.buttons() & Keys.LeftButton:  # bbox rotation
-                    self.bbox_controller.rotate_with_mouse(-dx, -dy)
-                elif a0.buttons() & Keys.RightButton:  # bbox translation
-                    new_center = self.view.gl_widget.get_world_coords(
-                        a0.x(), a0.y(), correction=True
-                    )
-                    self.bbox_controller.set_center(*new_center)  # absolute positioning
+                if a0.buttons() & Keys.LeftButton:
+                    if (
+                        self.primitive_type == "box"
+                        and self.bbox_controller.has_active_bbox()
+                    ):
+                        # bbox rotation
+                        self.bbox_controller.rotate_with_mouse(-dx, -dy)
+                elif a0.buttons() & Keys.RightButton:
+                    if (
+                        self.primitive_type == "box"
+                        and self.bbox_controller.has_active_bbox()
+                    ):
+                        # bbox translation
+                        new_center = self.view.gl_widget.get_world_coords(
+                            a0.x(), a0.y(), correction=True
+                        )
+                        self.bbox_controller.set_center(
+                            *new_center
+                        )  # absolute positioning
+                    elif (
+                        self.primitive_type == "sphere"
+                        and self.sphere_controller.has_active_sphere()
+                    ):
+                        # sphere translation
+                        new_center = self.view.gl_widget.get_world_coords(
+                            a0.x(), a0.y(), correction=True
+                        )
+                        self.sphere_controller.set_center(
+                            *new_center
+                        )  # absolute positioning
             else:
                 if a0.buttons() & Keys.LeftButton:  # pcd rotation
                     self.pcd_manager.rotate_around_x(dy)
@@ -238,7 +334,18 @@ class Controller:
         elif self.side_mode and self.bbox_controller.has_active_bbox():
             self.bbox_controller.get_active_bbox().change_side(  # type: ignore
                 self.selected_side, -a0.angleDelta().y() / 4000  # type: ignore
-            )  # ToDo implement method
+            )
+        elif (
+            self.primitive_type == "sphere"
+            and self.sphere_controller.has_active_sphere()
+            and not self.scroll_mode
+        ):
+            # Adjust active sphere's radius with scroll wheel
+            # Use smaller factor for finer control
+            delta = a0.angleDelta().y() / 1000  # Smaller value for finer control
+            self.sphere_controller.adjust_radius(increase=(delta > 0))
+            # Update the UI to reflect the changes
+            self.view.update_bbox_stats(self.sphere_controller.get_active_sphere())
         else:
             self.pcd_manager.zoom_into(a0.angleDelta().y())
             self.scroll_mode = True
@@ -259,8 +366,14 @@ class Controller:
             self.pcd_manager.reset_transformations()
             logging.info("Reseted position to default.")
 
-        elif a0.key() == Keys.Key_Delete:  # Delete active bbox
-            self.bbox_controller.delete_current_bbox()
+        elif a0.key() == Keys.Key_Delete:  # Delete active bbox or sphere
+            if (
+                self.primitive_type == "sphere"
+                and self.sphere_controller.has_active_sphere()
+            ):
+                self.sphere_controller.delete_current_sphere()
+            elif self.primitive_type == "box":
+                self.bbox_controller.delete_current_bbox()
 
         # Save labels to file
         elif a0.key() == Keys.Key_S and self.ctrl_pressed:
@@ -274,85 +387,146 @@ class Controller:
                 self.align_mode.reset()
                 logging.info("Resetted selected points!")
 
+        # Toggle between box and sphere mode
+        elif a0.key() == Keys.Key_M:
+            new_type = "sphere" if self.primitive_type != "sphere" else "box"
+            self.set_primitive_type(new_type)
+            logging.info(f"Switched to {new_type} creation mode")
+
         # BBOX MANIPULATION
-        elif a0.key() == Keys.Key_Z:
-            # z rotate counterclockwise
-            self.bbox_controller.rotate_around_z()
-        elif a0.key() == Keys.Key_X:
-            # z rotate clockwise
-            self.bbox_controller.rotate_around_z(clockwise=True)
-        elif a0.key() == Keys.Key_C:
-            # y rotate counterclockwise
-            self.bbox_controller.rotate_around_y()
-        elif a0.key() == Keys.Key_V:
-            # y rotate clockwise
-            self.bbox_controller.rotate_around_y(clockwise=True)
-        elif a0.key() == Keys.Key_B:
-            # x rotate counterclockwise
-            self.bbox_controller.rotate_around_x()
-        elif a0.key() == Keys.Key_N:
-            # x rotate clockwise
-            self.bbox_controller.rotate_around_x(clockwise=True)
-        elif a0.key() == Keys.Key_W:
-            # move backward
-            self.bbox_controller.translate_along_y()
-        elif a0.key() == Keys.Key_S:
-            # move forward
-            self.bbox_controller.translate_along_y(forward=True)
-        elif a0.key() == Keys.Key_A:
-            # move left
-            self.bbox_controller.translate_along_x(left=True)
-        elif a0.key() == Keys.Key_D:
-            # move right
-            self.bbox_controller.translate_along_x()
-        elif a0.key() == Keys.Key_Q:
-            # move up
-            self.bbox_controller.translate_along_z()
-        elif a0.key() == Keys.Key_E:
-            # move down
-            self.bbox_controller.translate_along_z(down=True)
+        elif self.primitive_type == "box" and self.bbox_controller.has_active_bbox():
+            if a0.key() == Keys.Key_Z:
+                # z rotate counterclockwise
+                self.bbox_controller.rotate_around_z()
+            elif a0.key() == Keys.Key_X:
+                # z rotate clockwise
+                self.bbox_controller.rotate_around_z(clockwise=True)
+            elif a0.key() == Keys.Key_C:
+                # y rotate counterclockwise
+                self.bbox_controller.rotate_around_y()
+            elif a0.key() == Keys.Key_V:
+                # y rotate clockwise
+                self.bbox_controller.rotate_around_y(clockwise=True)
+            elif a0.key() == Keys.Key_B:
+                # x rotate counterclockwise
+                self.bbox_controller.rotate_around_x()
+            elif a0.key() == Keys.Key_N:
+                # x rotate clockwise
+                self.bbox_controller.rotate_around_x(clockwise=True)
+            elif a0.key() == Keys.Key_W:
+                # move backward
+                self.bbox_controller.translate_along_y()
+            elif a0.key() == Keys.Key_S:
+                # move forward
+                self.bbox_controller.translate_along_y(forward=True)
+            elif a0.key() == Keys.Key_A:
+                # move left
+                self.bbox_controller.translate_along_x(left=True)
+            elif a0.key() == Keys.Key_D:
+                # move right
+                self.bbox_controller.translate_along_x()
+            elif a0.key() == Keys.Key_Q:
+                # move up
+                self.bbox_controller.translate_along_z()
+            elif a0.key() == Keys.Key_E:
+                # move down
+                self.bbox_controller.translate_along_z(down=True)
 
-        # BBOX Scaling
-        elif a0.key() == Keys.Key_I:
-            # increase length
-            self.bbox_controller.scale_along_length()
-        elif a0.key() == Keys.Key_O:
-            # decrease length
-            self.bbox_controller.scale_along_length(decrease=True)
-        elif a0.key() == Keys.Key_K:
-            # increase width
-            self.bbox_controller.scale_along_width()
-        elif a0.key() == Keys.Key_L:
-            # decrease width
-            self.bbox_controller.scale_along_width(decrease=True)
-        elif a0.key() == Keys.Key_Comma:
-            # increase height
-            self.bbox_controller.scale_along_height()
-        elif a0.key() == Keys.Key_Period:
-            # decrease height
-            self.bbox_controller.scale_along_height(decrease=True)
+            # BBOX Scaling
+            elif a0.key() == Keys.Key_I:
+                # increase length
+                self.bbox_controller.scale_along_length()
+            elif a0.key() == Keys.Key_O:
+                # decrease length
+                self.bbox_controller.scale_along_length(decrease=True)
+            elif a0.key() == Keys.Key_K:
+                # increase width
+                self.bbox_controller.scale_along_width()
+            elif a0.key() == Keys.Key_L:
+                # decrease width
+                self.bbox_controller.scale_along_width(decrease=True)
+            elif a0.key() == Keys.Key_Comma:
+                # increase height
+                self.bbox_controller.scale_along_height()
+            elif a0.key() == Keys.Key_Period:
+                # decrease height
+                self.bbox_controller.scale_along_height(decrease=True)
 
-        elif a0.key() in [Keys.Key_R, Keys.Key_Left]:
-            # load previous sample
-            self.prev_pcd()
-        elif a0.key() in [Keys.Key_F, Keys.Key_Right]:
-            # load next sample
-            self.next_pcd()
-        elif a0.key() in [Keys.Key_T, Keys.Key_Up]:
-            # select previous bbox
-            self.select_relative_bbox(-1)
-        elif a0.key() in [Keys.Key_G, Keys.Key_Down]:
-            # select previous bbox
-            self.select_relative_bbox(1)
-        elif a0.key() == Keys.Key_Y:
-            # change bbox class to previous available class
-            self.select_relative_class(-1)
-        elif a0.key() == Keys.Key_H:
-            # change bbox class to next available class
-            self.select_relative_class(1)
-        elif a0.key() in list(range(49, 58)):
-            # select bboxes with 1-9 digit keys
-            self.bbox_controller.set_active_bbox(int(a0.key()) - 49)
+            elif a0.key() in [Keys.Key_R, Keys.Key_Left]:
+                # load previous sample
+                self.prev_pcd()
+            elif a0.key() in [Keys.Key_F, Keys.Key_Right]:
+                # load next sample
+                self.next_pcd()
+            elif a0.key() in [Keys.Key_T, Keys.Key_Up]:
+                # select previous bbox
+                self.select_relative_bbox(-1)
+            elif a0.key() in [Keys.Key_G, Keys.Key_Down]:
+                # select previous bbox
+                self.select_relative_bbox(1)
+            elif a0.key() == Keys.Key_Y:
+                # change bbox class to previous available class
+                self.select_relative_class(-1)
+            elif a0.key() == Keys.Key_H:
+                # change bbox class to next available class
+                self.select_relative_class(1)
+            elif a0.key() in list(range(49, 58)):
+                # select bboxes with 1-9 digit keys
+                self.bbox_controller.set_active_bbox(int(a0.key()) - 49)
+
+            # SPHERE MANIPULATION
+            # Handle translation keys for spheres
+            elif (
+                self.primitive_type == "sphere"
+                and self.sphere_controller.has_active_sphere()
+            ):
+                if a0.key() == Keys.Key_W:
+                    # move backward
+                    self.sphere_controller.translate_along_y()
+                elif a0.key() == Keys.Key_S:
+                    # move forward
+                    self.sphere_controller.translate_along_y(forward=True)
+                elif a0.key() == Keys.Key_A:
+                    # move left
+                    self.sphere_controller.translate_along_x(left=True)
+                elif a0.key() == Keys.Key_D:
+                    # move right
+                    self.sphere_controller.translate_along_x()
+                elif a0.key() == Keys.Key_Q:
+                    # move up
+                    self.sphere_controller.translate_along_z()
+                elif a0.key() == Keys.Key_E:
+                    # move down
+                    self.sphere_controller.translate_along_z(down=True)
+                elif a0.key() == Keys.Key_Plus or a0.key() == Keys.Key_Equal:
+                    # increase radius
+                    self.sphere_controller.adjust_radius(increase=True)
+                elif a0.key() == Keys.Key_Minus:
+                    # decrease radius
+                    self.sphere_controller.adjust_radius(increase=False)
+                # Add these new controls
+                elif a0.key() in [Keys.Key_R, Keys.Key_Left]:
+                    # load previous sample
+                    self.prev_pcd()
+                elif a0.key() in [Keys.Key_F, Keys.Key_Right]:
+                    # load next sample
+                    self.next_pcd()
+                elif a0.key() in [Keys.Key_T, Keys.Key_Up]:
+                    # select previous sphere
+                    self.select_relative_sphere(-1)
+                elif a0.key() in [Keys.Key_G, Keys.Key_Down]:
+                    # select next sphere
+                    self.select_relative_sphere(1)
+                elif a0.key() == Keys.Key_Y:
+                    # change sphere class to previous available class
+                    self.select_relative_class_for_sphere(-1)
+                elif a0.key() == Keys.Key_H:
+                    # change sphere class to next available class
+                    self.select_relative_class_for_sphere(1)
+                elif a0.key() in list(range(49, 58)):
+                    # select spheres with 1-9 digit keys
+                    if int(a0.key()) - 49 < len(self.sphere_controller.spheres):
+                        self.sphere_controller.set_active_sphere(int(a0.key()) - 49)
 
     def select_relative_class(self, step: int):
         if step == 0:
@@ -388,3 +562,65 @@ class Controller:
             logging.warning("No points found inside the box. Ignored.")
             return
         self.view.save_point_cloud_as(pointcloud)
+
+    def select_points_in_sphere(self, center: np.ndarray, radius: float) -> None:
+        """Select points within sphere for current point cloud.
+
+        Args:
+            center: Center point of sphere (x,y,z)
+            radius: Radius of sphere in world coordinates
+        """
+        if self.pcd_manager.pointcloud is None:
+            logging.warning("No point cloud loaded")
+            return
+
+        # Get points inside sphere
+        points = self.pcd_manager.pointcloud.points
+        points_inside = points_in_sphere(points, center, radius)
+
+        # Update labels for selected points
+        if self.has_active_sphere():
+            sphere = self.get_active_sphere()
+            self.pcd_manager.assign_point_label_in_sphere(sphere, points_inside)
+            logging.info(f"Selected {np.sum(points_inside)} points in sphere")
+
+    def has_active_sphere(self) -> bool:
+        """Check if there is an active sphere."""
+        return self.sphere_controller.has_active_sphere()
+
+    def get_active_sphere(self) -> Optional[Sphere]:
+        """Get the active sphere if any."""
+        return self.sphere_controller.get_active_sphere()
+
+    def select_relative_sphere(self, step: int):
+        """Select the previous or next sphere relative to the currently active one."""
+        if step == 0 or not self.sphere_controller.spheres:
+            return
+
+        max_id = len(self.sphere_controller.spheres) - 1
+        curr_id = self.sphere_controller.active_sphere_id
+
+        if curr_id is None:
+            # If no sphere is selected, select the first one
+            new_id = 0
+        else:
+            new_id = curr_id + step
+            # Handle wrap-around
+            if new_id < 0:
+                new_id = max_id
+            elif new_id > max_id:
+                new_id = 0
+
+        self.sphere_controller.set_active_sphere(new_id)
+
+    def select_relative_class_for_sphere(self, step: int):
+        """Change the class of the active sphere to the previous or next available class."""
+        if step == 0 or not self.sphere_controller.has_active_sphere():
+            return
+
+        sphere = self.sphere_controller.get_active_sphere()
+        curr_class = sphere.get_classname()
+        new_class = LabelConfig().get_relative_class(curr_class, step)
+
+        sphere.set_classname(new_class)
+        self.sphere_controller.update_all()  # Update UI

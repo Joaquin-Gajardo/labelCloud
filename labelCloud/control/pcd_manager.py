@@ -6,16 +6,17 @@ Sets the point cloud and original point cloud path. Initiate the writing to the 
 import logging
 from pathlib import Path
 from shutil import copyfile
-from typing import TYPE_CHECKING, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, List, Optional, Set, Tuple, Union
 
 import numpy as np
+import numpy.typing as npt
 import open3d as o3d
 import pkg_resources
 
 from ..definitions import LabelingMode, Point3D
 from ..io.labels.config import LabelConfig
 from ..io.pointclouds import BasePointCloudHandler, Open3DHandler
-from ..model import BBox, Perspective, PointCloud
+from ..model import BBox, Perspective, PointCloud, Sphere
 from ..utils.logger import blue, green, print_column
 from .config_manager import config
 from .label_manager import LabelManager
@@ -144,10 +145,19 @@ class PointCloudManger(object):
         for label_class in LabelConfig().classes:
             self.view.current_class_dropdown.addItem(label_class.name)
 
-    def get_labels_from_file(self) -> List[BBox]:
-        bboxes = self.label_manager.import_labels(self.pcd_path)
-        logging.info(green("Loaded %s bboxes!" % len(bboxes)))
-        return bboxes
+    def get_labels_from_file(
+        self,
+    ) -> Union[List[BBox], Tuple[List[BBox], List[Sphere]]]:
+        labels = self.label_manager.import_labels(self.pcd_path)
+
+        if isinstance(labels, tuple) and len(labels) == 2:
+            bboxes, spheres = labels
+            logging.info(f"Loaded {len(bboxes)} bboxes and {len(spheres)} spheres!")
+            return bboxes, spheres
+        else:
+            # Backward compatibility
+            logging.info(f"Loaded {len(labels)} bboxes!")
+            return labels
 
     # SETTER
     def set_view(self, view: "GUI") -> None:
@@ -157,12 +167,21 @@ class PointCloudManger(object):
             set(LabelConfig().get_classes().keys())
         )  # TODO: Move to better location
 
-    def save_labels_into_file(self, bboxes: List[BBox]) -> None:
+    def save_labels_into_file(
+        self, bboxes: List[BBox], spheres: Optional[List[Sphere]] = None
+    ) -> None:
+        if spheres is None:
+            spheres = []
+
         if self.pcds:
-            self.label_manager.export_labels(self.pcd_path, bboxes)
+            self.label_manager.export_labels(self.pcd_path, bboxes, spheres)
             self.collected_object_classes.update(
                 {bbox.get_classname() for bbox in bboxes}
             )
+            if spheres:
+                self.collected_object_classes.update(
+                    {sphere.get_classname() for sphere in spheres}
+                )
         else:
             logging.warning("No point clouds to save labels for!")
 
@@ -275,6 +294,28 @@ class PointCloudManger(object):
             self.pointcloud.update_selected_points_in_label_vbo(points_inside)
             logging.info(
                 f"Labeled {np.sum(points_inside)} points inside the current bounding box with label `{box.classname}`"
+            )
+
+    def assign_point_label_in_sphere(
+        self, sphere, points_inside: npt.NDArray[np.bool_]
+    ) -> None:
+        """Assign label to points inside sphere selection.
+
+        Args:
+            sphere: Sphere containing class info
+            points_inside: Boolean mask of points inside sphere
+        """
+        assert self.pointcloud is not None
+
+        # Update labels if segmentation is enabled
+        if self.pointcloud.has_label:
+            assert self.pointcloud.labels is not None
+            self.pointcloud.labels[points_inside] = (
+                LabelConfig().get_class(sphere.classname).id
+            )
+            self.pointcloud.update_selected_points_in_label_vbo(points_inside)
+            logging.info(
+                f"Labeled {np.sum(points_inside)} points in sphere with label `{sphere.classname}`"
             )
 
     # HELPER

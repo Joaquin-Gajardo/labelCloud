@@ -61,6 +61,11 @@ class SpherePickingStrategy(BaseLabelingStrategy):
             label=config.get("LABEL", "STD_OBJECT_CLASS"),
         )
 
+    def get_bbox(self):
+        # For compatibility with abstract base class
+        # Either return None or implement sphere-to-bbox conversion if needed
+        return None
+
     def is_bbox_finished(self) -> bool:
         """Check if we have enough points to create a sphere."""
         return self.points_registered >= self.POINTS_NEEDED
@@ -70,4 +75,4 @@ class SpherePickingStrategy(BaseLabelingStrategy):
         self.tmp_p1 = None
         self.sphere_radius = config.getfloat("LABEL", "std_sphere_radius", fallback=0.5)
         if hasattr(self.view, "button_sphere"):
-            self.view.button_sphere.setChecked(False)
+            self.view.button_pick_sphere.setChecked(False)

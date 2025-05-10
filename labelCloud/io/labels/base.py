@@ -58,6 +58,17 @@ class BaseLabelFormat(ABC):
             raise ValueError("Received unknown label format/ type.")
         return label_path
 
+    def get_label_path(self, pcd_path: Path) -> Path:
+        """Get the path to the label file corresponding to a point cloud file.
+
+        Args:
+            pcd_path: Path to the point cloud file
+
+        Returns:
+            Path to the label file
+        """
+        return self.label_folder.joinpath(pcd_path.stem + self.FILE_ENDING)
+
     @abstractmethod
     def import_labels(self, pcd_path: Path) -> List[BBox]:
         raise NotImplementedError
