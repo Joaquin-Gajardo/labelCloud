@@ -13,7 +13,7 @@ from ..io.labels.config import LabelConfig
 class Sphere:
     """A sphere for labeling points in a point cloud."""
 
-    def __init__(self, center=None, radius=1.0, label=""):
+    def __init__(self, center=None, radius=1.0):
         """Initialize a sphere for labeling.
 
         Args:
@@ -25,10 +25,12 @@ class Sphere:
             np.array(center) if center is not None else np.array([0.0, 0.0, 0.0])
         )
         self.radius = max(radius, 0.01)  # Ensure minimum radius
-        self.classname = label  # Using the same attribute name as BoundingBox
+        self.classname: str = LabelConfig().get_default_class_name()
         self.id = None  # Will be assigned when added to collection
         self.color = (
-            LabelConfig().get_class_color(label) if label else Color3f(0.7, 0.7, 0.7)
+            LabelConfig().get_class_color(self.classname)
+            if self.classname
+            else Color3f(0.7, 0.7, 0.7)
         )
         self.selected = False
 

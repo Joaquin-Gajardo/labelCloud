@@ -55,11 +55,7 @@ class SpherePickingStrategy(BaseLabelingStrategy):
     def get_sphere(self) -> Sphere:
         """Create a sphere at the selected point."""
         assert self.point_1 is not None
-        return Sphere(
-            center=self.point_1,
-            radius=self.sphere_radius,
-            label=config.get("LABEL", "STD_OBJECT_CLASS"),
-        )
+        return Sphere(center=self.point_1, radius=self.sphere_radius)
 
     def get_bbox(self):
         # For compatibility with abstract base class
@@ -74,5 +70,5 @@ class SpherePickingStrategy(BaseLabelingStrategy):
         super().reset()
         self.tmp_p1 = None
         self.sphere_radius = config.getfloat("LABEL", "std_sphere_radius", fallback=0.5)
-        if hasattr(self.view, "button_sphere"):
+        if hasattr(self.view, "button_pick_sphere"):
             self.view.button_pick_sphere.setChecked(False)

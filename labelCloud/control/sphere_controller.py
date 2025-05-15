@@ -1,5 +1,6 @@
 # labelCloud/control/sphere_controller.py
 import logging
+from functools import wraps
 from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
@@ -10,6 +11,21 @@ from .pcd_manager import PointCloudManger
 
 if TYPE_CHECKING:
     from ..view.gui import GUI
+
+
+def has_active_sphere_decorator(func):
+    """
+    Only execute sphere manipulation if there is an active sphere.
+    """
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if args[0].has_active_sphere():
+            return func(*args, **kwargs)
+        else:
+            logging.warning("There is currently no active sphere to manipulate.")
+
+    return wrapper
 
 
 class SphereController:
@@ -130,11 +146,13 @@ class SphereController:
         # Update UI
         self.update_all()
 
+    @has_active_sphere_decorator
     def set_center(self, x: float, y: float, z: float) -> None:
         """Set the center of the active sphere."""
         if self.has_active_sphere():
             self.get_active_sphere().set_center(x, y, z)
 
+    @has_active_sphere_decorator
     def translate_along_x(self, left: bool = False) -> None:
         """Translate the active sphere along the X axis."""
         if self.has_active_sphere():
@@ -144,6 +162,7 @@ class SphereController:
             step = -step if left else step
             self.get_active_sphere().translate(np.array([step, 0, 0]))
 
+    @has_active_sphere_decorator
     def translate_along_y(self, forward: bool = False) -> None:
         """Translate the active sphere along the Y axis."""
         if self.has_active_sphere():
@@ -153,6 +172,7 @@ class SphereController:
             step = step if forward else -step
             self.get_active_sphere().translate(np.array([0, step, 0]))
 
+    @has_active_sphere_decorator
     def translate_along_z(self, down: bool = False) -> None:
         """Translate the active sphere along the Z axis."""
         if self.has_active_sphere():
@@ -162,6 +182,7 @@ class SphereController:
             step = -step if down else step
             self.get_active_sphere().translate(np.array([0, 0, step]))
 
+    @has_active_sphere_decorator
     def adjust_radius(self, increase: bool = True) -> None:
         """Adjust the radius of the active sphere."""
         if self.has_active_sphere():
@@ -176,6 +197,7 @@ class SphereController:
         if self.has_active_sphere():
             self.get_active_sphere().set_classname(classname)
 
+    @has_active_sphere_decorator
     def update_position(self, parameter: str, value: float) -> None:
         """Update a position parameter of the active sphere."""
         if not self.has_active_sphere():
@@ -193,11 +215,13 @@ class SphereController:
 
         sphere.set_center(center[0], center[1], center[2])
 
+    @has_active_sphere_decorator
     def update_radius(self, value: float) -> None:
         """Update the radius of the active sphere."""
         if self.has_active_sphere():
             self.get_active_sphere().set_radius(value)
 
+    @has_active_sphere_decorator
     def assign_point_label_in_active_sphere(self) -> None:
         """Assign label to points inside the active sphere."""
         if not self.has_active_sphere() or self.pcd_manager.pointcloud is None:
