@@ -342,23 +342,15 @@ class GUI(QtWidgets.QMainWindow):
 
         # LABEL CONTROL
         self.button_pick_bbox.clicked.connect(
-            lambda: self.controller.drawing_mode.set_drawing_strategy(
-                PickingStrategy(self)
-            )
+            lambda: self.controller.set_drawing_strategy(PickingStrategy(self))
         )
         self.button_span_bbox.clicked.connect(
-            lambda: self.controller.drawing_mode.set_drawing_strategy(
-                SpanningStrategy(self)
-            )
+            lambda: self.controller.set_drawing_strategy(SpanningStrategy(self))
         )
         self.button_pick_sphere.clicked.connect(
-            lambda: self.controller.drawing_mode.set_drawing_strategy(
-                SpherePickingStrategy(self)
-            )
+            lambda: self.controller.set_drawing_strategy(SpherePickingStrategy(self))
         )
-        self.button_pick_sphere.clicked.connect(
-            lambda: self.controller.set_primitive_type("sphere")
-        )
+
         self.button_save_label.clicked.connect(self.controller.save)
 
         # BOUNDING BOX PARAMETER
@@ -749,59 +741,6 @@ class GUI(QtWidgets.QMainWindow):
         LabelConfig().set_class_color(
             bbox.classname, Color3f.from_qcolor(QColorDialog.getColor())
         )
-
-    def update_primitive_mode(self, primitive_type: str) -> None:
-        """Updates the UI to reflect the current primitive creation mode (box or sphere)."""
-        # Update visual indicators or button states to show current mode
-        if primitive_type == "sphere":
-            self.button_pick_sphere.setChecked(True)
-            self.button_pick_bbox.setChecked(False)
-            self.button_span_bbox.setChecked(False)
-        elif primitive_type == "box":
-            self.button_pick_sphere.setChecked(False)
-            # Keep the current box creation mode selected, or default to one if none is selected
-            if (
-                not self.button_pick_bbox.isChecked()
-                and not self.button_span_bbox.isChecked()
-            ):
-                self.button_pick_bbox.setChecked(True)
-
-        # Update any other UI elements that need to reflect the current primitive mode
-        # For example, showing/hiding dimension controls that are specific to boxes or spheres
-        box_controls_visible = primitive_type == "box"
-        self.dial_bbox_z_rotation.setVisible(box_controls_visible)
-
-        # Update status message
-        self.status_manager.set_message(f"Switched to {primitive_type} creation mode.")
-
-    def update_primitive_mode(self, primitive_type: str) -> None:
-        """Updates the UI to reflect the current primitive creation mode."""
-        # Update button states
-        if primitive_type == "sphere":
-            # Update button states
-            self.button_pick_sphere.setChecked(True)
-            self.button_pick_bbox.setChecked(False)
-            self.button_span_bbox.setChecked(False)
-
-            # Hide box-specific controls
-            self.dial_bbox_z_rotation.setVisible(False)
-            self.button_bbox_decrease_dimension.setVisible(False)
-            self.button_bbox_increase_dimension.setVisible(False)
-
-            # Update labels
-            self.label_volume.setText("Sphere Volume")
-
-        elif primitive_type == "box":
-            # Update button states
-            self.button_pick_sphere.setChecked(False)
-
-            # Show box-specific controls
-            self.dial_bbox_z_rotation.setVisible(True)
-            self.button_bbox_decrease_dimension.setVisible(True)
-            self.button_bbox_increase_dimension.setVisible(True)
-
-            # Update labels
-            self.label_volume.setText("Box Volume")
 
     @staticmethod
     def save_point_cloud_as(pointcloud: PointCloud) -> None:

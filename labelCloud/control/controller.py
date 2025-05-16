@@ -8,6 +8,8 @@ from PyQt5.QtCore import Qt as Keys
 
 from ..definitions import BBOX_SIDES, Colors, Context, LabelingMode
 from ..io.labels.config import LabelConfig
+from ..labeling_strategies.picking import PickingStrategy
+from ..labeling_strategies.sphere_picking import SpherePickingStrategy
 from ..model.sphere import Sphere
 from ..utils import oglhelper
 from ..utils.math3d import points_in_sphere
@@ -69,19 +71,23 @@ class Controller:
         self.set_selected_side()
         self.view.gl_widget.updateGL()
 
-    def set_primitive_type(self, primitive_type: str) -> None:
-        """Set the type of primitive to create (box or sphere)."""
-        if primitive_type in ["box", "sphere"]:
-            self.primitive_type = primitive_type
-            self.drawing_mode.set_primitive_type(primitive_type)
+    def set_primitive_type(self, strategy) -> None:
+        """Update controller's primitive type based on strategy type"""
 
-            # Update UI to reflect current mode
-            if self.view:
-                self.view.update_primitive_mode(primitive_type)
+        if isinstance(strategy, SpherePickingStrategy):
+            self.primitive_type = "sphere"
+        else:  # Default to box for PickingStrategy and SpanningStrategy
+            self.primitive_type = "box"
 
-            # Reset drawing mode when switching primitive types
-            if self.drawing_mode.is_active():
-                self.drawing_mode.reset()
+    def set_drawing_strategy(self, strategy):
+        """Wrapper to set drawing strategy and synchronize primitive type.
+
+        This ensures the controller and drawing manager are in sync.
+        """
+        # Set the drawing strategy in the drawing manager
+        self.drawing_mode.set_drawing_strategy(strategy)
+        # Update the primitive type in the controller
+        self.set_primitive_type(strategy)
 
     # POINT CLOUD METHODS
     def next_pcd(self, save: bool = True) -> None:
@@ -182,48 +188,13 @@ class Controller:
         """Triggers actions when the user clicks the mouse."""
         self.last_cursor_pos = a0.pos()
 
-        # Handle sphere selection and creation
         if (
             self.primitive_type == "sphere"
+            and self.drawing_mode.is_active()
             and (a0.buttons() & Keys.LeftButton)
             and (not self.ctrl_pressed)
-            and (not self.drawing_mode.is_active())
-            and (not self.align_mode.is_active)
         ):
-            # Get world coordinates from screen position
-            world_pos = self.view.gl_widget.get_world_coords(
-                a0.x(), a0.y(), correction=False
-            )
-
-            # First try to select an existing sphere
-            selected = False
-            if self.sphere_controller.spheres:
-                # Find closest sphere
-                closest_sphere = None
-                closest_distance = float("inf")
-
-                for sphere in self.sphere_controller.spheres:
-                    distance = np.linalg.norm(sphere.center - world_pos)
-                    if distance < closest_distance:
-                        closest_distance = distance
-                        closest_sphere = sphere
-
-                # If clicked close to an existing sphere, select it instead of creating a new one
-                if closest_sphere and closest_distance <= closest_sphere.radius * 1.5:
-                    self.sphere_controller.set_active_sphere(closest_sphere.id)
-                    selected = True
-
-            # If no sphere was selected, create a new one
-            if not selected:
-                # Create new sphere at clicked position
-                radius = float(config.get("LABEL", "std_sphere_radius", fallback=0.5))
-                sphere = Sphere(
-                    center=world_pos,
-                    radius=radius,
-                    label=LabelConfig().get_default_class_name(),
-                )
-                self.sphere_controller.add_sphere(sphere)
-            return
+            self.drawing_mode.register_point(a0.x(), a0.y(), correction=True)
 
         elif (
             self.primitive_type == "box"
@@ -240,6 +211,10 @@ class Controller:
 
         elif self.selected_side:
             self.side_mode = True
+
+        else:
+            # Just a click
+            pass
 
     def mouse_double_clicked(self, a0: QtGui.QMouseEvent) -> None:
         """Triggers actions when the user double clicks the mouse."""
@@ -389,9 +364,13 @@ class Controller:
 
         # Toggle between box and sphere mode
         elif a0.key() == Keys.Key_M:
-            new_type = "sphere" if self.primitive_type != "sphere" else "box"
-            self.set_primitive_type(new_type)
-            logging.info(f"Switched to {new_type} creation mode")
+            new_type = (
+                SpherePickingStrategy(self.view)
+                if self.primitive_type != "sphere"
+                else PickingStrategy(self.view)
+            )
+            self.set_drawing_strategy(new_type)
+            logging.info(f"Switched to {self.primitive_type} creation mode")
 
         # BBOX MANIPULATION
         elif self.primitive_type == "box" and self.bbox_controller.has_active_bbox():
