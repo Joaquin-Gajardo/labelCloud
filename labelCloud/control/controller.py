@@ -315,15 +315,36 @@ class Controller:
             and self.sphere_controller.has_active_sphere()
             and not self.scroll_mode
         ):
-            # Adjust active sphere's radius with scroll wheel
-            # Use smaller factor for finer control
-            delta = a0.angleDelta().y() / 1000  # Smaller value for finer control
-            self.sphere_controller.adjust_radius(increase=(delta > 0))
-            # Update the UI to reflect the changes
-            self.view.update_bbox_stats(self.sphere_controller.get_active_sphere())
+            # Check if cursor is near the active sphere (for bbox it's handled with side_mode)
+            sphere = self.sphere_controller.get_active_sphere()
+            if self.cursor_near_sphere(sphere):
+                # Adjust active sphere's radius with scroll wheel
+                delta = a0.angleDelta().y() / 1000  # Smaller value for finer control
+                self.sphere_controller.adjust_radius(increase=(delta > 0))
+                # Update the UI to reflect the changes
+                self.view.update_bbox_stats(self.sphere_controller.get_active_sphere())
+            else:
+                # If cursor is not near sphere, perform default zoom
+                self.pcd_manager.zoom_into(a0.angleDelta().y())
+                self.scroll_mode = True
         else:
             self.pcd_manager.zoom_into(a0.angleDelta().y())
             self.scroll_mode = True
+
+    def cursor_near_sphere(self, sphere) -> bool:
+        """Check if cursor is near the given sphere."""
+        if not self.curr_cursor_pos or not sphere:
+            return False
+
+        # Get world coords at cursor position
+        world_pos = self.view.gl_widget.get_world_coords(
+            self.curr_cursor_pos.x(), self.curr_cursor_pos.y(), correction=False
+        )
+
+        # Check if cursor is within certain distance of sphere
+        distance = np.linalg.norm(sphere.center - world_pos)
+        # Use a slightly larger threshold than the sphere radius for easier interaction
+        return distance <= sphere.radius * 1.5
 
     def key_press_event(self, a0: QtGui.QKeyEvent) -> None:
         """Triggers actions when the user presses a key."""
@@ -603,3 +624,23 @@ class Controller:
 
         sphere.set_classname(new_class)
         self.sphere_controller.update_all()  # Update UI
+
+    def handle_deselect_button_clicked(self) -> None:
+        """Handle deselect button click for active primitive."""
+        if (
+            self.primitive_type == "sphere"
+            and self.sphere_controller.has_active_sphere()
+        ):
+            self.sphere_controller.deselect_sphere()
+        else:
+            self.bbox_controller.deselect_bbox()
+
+    def handle_delete_button_clicked(self) -> None:
+        """Handle delete button click for active primitive."""
+        if (
+            self.primitive_type == "sphere"
+            and self.sphere_controller.has_active_sphere()
+        ):
+            self.sphere_controller.delete_current_sphere()
+        else:
+            self.bbox_controller.delete_current_bbox()
