@@ -317,10 +317,10 @@ class GUI(QtWidgets.QMainWindow):
             self.controller.bbox_controller.set_classname
         )
         self.button_deselect_label.clicked.connect(
-            self.controller.bbox_controller.deselect_bbox
+            self.controller.handle_deselect_button_clicked
         )
         self.button_delete_label.clicked.connect(
-            self.controller.bbox_controller.delete_current_bbox
+            self.controller.handle_delete_button_clicked
         )
         self.label_list.currentRowChanged.connect(
             self.controller.bbox_controller.set_active_bbox
